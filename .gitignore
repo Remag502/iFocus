@@ -1,0 +1,17 @@
+# Ignore everything under env and instance directories
+env/
+instance/
+.env
+
+# Ignore all .pdf files in static/uploads/pdfs
+static/uploads/pdfs/*.pdf
+
+# Ignore .idea files
+.idea/
+__pycache__/
+.DS_Store
+iFocus/.DS_Store
+
+# Ignore https cert files
+cert.pem
+key.pem

@@ -1,0 +1,561 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div id="overlay"></div>
+<div id="modal-content">
+    <span class="close-button" onclick="hideOverlay()">×</span>
+    <div id="modal-body"></div>
+</div>
+
+<h1>Assignment: {{ assignment.title }}</h1>
+
+<div class="mt-4">
+    <!-- Flex container for Calibration button and toggle -->
+    <div class="d-flex align-items-center gap-3">
+        <!-- Load Calibration Template -->
+        <a onclick="loadTemplate()" class="btn btn-primary me-3">Calibrate Eye Tracker</a>
+        <!-- Advanced Toggle -->
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="advancedToggle" onchange="toggleAdvancedSettings()">
+            <label class="form-check-label" for="advancedToggle">Advanced</label>
+        </div>
+        <!-- Toggle Eye Tracking Dot -->
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="flexSwitchCheckChecked" checked>
+            <label class="form-check-label" for="flexSwitchCheckChecked">View Eye Tracking Dot</label>
+        </div>
+    </div>
+    <!-- Variable Adjustment Section -->
+    <div class="mt-3">
+        <div id="variableSettings" style="display: none; margin-top: 10px;">
+            <div class="d-flex flex-wrap gap-3">
+                <div class="mb-2">
+                    <label for="jitterTolerance" class="form-label">Jitter Tolerance (frames):</label>
+                    <input type="number" id="jitterTolerance" class="form-control" value="5"
+                        onchange="updateVariable('jitterTolerance', this.value)">
+                </div>
+                <div class="mb-2">
+                    <label for="requiredDuration" class="form-label">Not Looking Warning (sec):</label>
+                    <input type="number" id="requiredDuration" class="form-control" value="15"
+                        onchange="updateVariable('requiredDuration', this.value)">
+                </div>
+                <div class="mb-2">
+                    <label for="focusTime" class="form-label">General Focus Time (sec):</label>
+                    <input type="number" id="focusTime" class="form-control" value="60"
+                        onchange="updateVariable('focusTime', this.value)">
+                </div>
+                <div class="mb-2">
+                    <label for="focusThreshold" class="form-label">Minimum Focus Average (%):</label>
+                    <input type="number" id="focusThreshold" class="form-control" value="70"
+                        onchange="updateVariable('focusThreshold', this.value)">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<div id="learning-content" class="row mt-4">
+    <!-- PDF/YouTube content -->
+    <div class="col-md-8">
+        {% if assignment.pdf_path %}
+        <embed src="{{ url_for('static', filename='uploads/pdfs/' + pdf_filename) }}" type="application/pdf"
+            width="100%" height="600px">
+        {% elif assignment.youtube_url %}
+        <div class="embed-responsive embed-responsive-16by9">
+            <iframe id="youtube-player" width="100%" height="600"
+                src="https://www.youtube.com/embed/{{ assignment.youtube_url.split('v=')[1].split('&')[0] }}?enablejsapi=1"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen>
+            </iframe>
+        </div>
+        {% else %}
+        <p>Unsupported assignment type.</p>
+        {% endif %}
+    </div>
+
+
+    <div class="col-md-4">
+        <div id="flash-message"></div>
+        <h4 class="mt-3">Notes</h4>
+
+        <form id="note-form" method="POST">
+            <div class="form-group">
+                <textarea class="form-control" id="note" name="note_content"
+                    rows="6">{{ note.text or assignment.summary or '' }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-success mt-3">Save Note</button>
+        </form>
+    </div>
+</div>
+
+<div class="mt-4">
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-primary">Back to Your Assignments</a>
+</div>
+
+<!-- Popup container -->
+<div id="popup-container" style="position: fixed; bottom: 10px; right: 10px; z-index: 1050;"></div>
+<audio id="popup-sound" src="{{ url_for('static', filename='notification.mp3') }}"></audio>
+
+
+<!-- Include Summernote CSS and JS -->
+<link href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-lite.min.css" rel="stylesheet">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-lite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/webgazer"></script> <!-- Include WebGazer -->
+<script src="https://www.youtube.com/iframe_api"></script> <!-- Youtube Javascript API-->>
+
+<style>
+    /* Ensure the Summernote editable area has a consistent style */
+    .note-editable {
+        background-color: #ffffff !important;
+        /* Set a fixed background color */
+        color: #212529 !important;
+        /* Set a fixed text color */
+    }
+
+    #overlay,
+    #modal-content,
+    #modal-body {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    #overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        /* Semi-transparent gray */
+        display: none;
+        /* Hidden by default */
+        z-index: 1000;
+    }
+
+    /* Modal content container */
+    #modal-content {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        /* transform: translate(-50%, -50%); */
+        background: transparent;
+        /* padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); */
+        z-index: 1001;
+        display: none;
+        /* Hidden by default */
+    }
+
+    #modal-body {
+        position: relative;
+    }
+
+    /* Close button */
+    .close-button {
+        display: inline-block;
+        margin-left: auto;
+        cursor: pointer;
+        color: red;
+        font-size: 3rem;
+        right: 10px;
+    }
+</style>
+
+<script>
+    // Handle popup messages
+    function showPopupMessage(message, type = 'info', duration = 3000) {
+        // Play the sound
+        const sound = document.getElementById('popup-sound');
+        sound.play();
+
+        // Create the alert div
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show mb-2`;
+        alertDiv.style.minWidth = '250px'; // Optional: Adjust width for consistency
+        alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+
+        // Append to the container
+        const container = document.getElementById('popup-container');
+        container.appendChild(alertDiv);
+
+        // Automatically remove the alert after the duration
+        setTimeout(() => {
+            alertDiv.classList.remove('show'); // Fade-out effect
+            setTimeout(() => alertDiv.remove(), 150); // Ensure element is removed after fade
+        }, duration);
+    }
+
+    // Advanced button functionality
+    function toggleAdvancedSettings() {
+        const settingsDiv = document.getElementById('variableSettings');
+        const isChecked = document.getElementById('advancedToggle').checked;
+        settingsDiv.style.display = isChecked ? 'block' : 'none';
+    }
+    // Function to update variables dynamically
+    function updateVariable(variableName, value) {
+        const parsedValue = parseInt(value, 10);
+        if (isNaN(parsedValue)) {
+            alert("Please enter a valid integer.");
+            return;
+        }
+
+        switch (variableName) {
+            case 'jitterTolerance':
+                jitterTolerance = parsedValue;
+                break;
+            case 'requiredDuration':
+                requiredDuration = parsedValue;
+                break;
+            case 'focusTime':
+                focusTime = parsedValue;
+                break;
+            case 'focusThreshold':
+                focusThreshold = parsedValue;
+                break;
+            default:
+                console.warn(`Unknown variable: ${variableName}`);
+        }
+
+        console.log(`${variableName} updated to: ${parsedValue}`);
+    }
+
+    // Disable eye tracking dot from switch
+    // Select the switch element
+    const eyeTrackingSwitch = document.getElementById('flexSwitchCheckChecked');
+
+    // Add an event listener for the 'change' event
+    eyeTrackingSwitch.addEventListener('change', (event) => {
+        if (event.target.checked) {
+            console.log('Eye Tracking Dot is ON');
+            webgazer.showPredictionPoints(true);
+        } else {
+            console.log('Eye Tracking Dot is OFF');
+            webgazer.showPredictionPoints(false);
+        }
+    });
+
+    let player;
+
+    // This function is called automatically by the YouTube API when it's ready
+    function onYouTubeIframeAPIReady() {
+        player = new YT.Player('youtube-player', {
+            events: {
+                'onStateChange': onPlayerStateChange
+            }
+        });
+    }
+
+    // State change callback
+    function onPlayerStateChange(event) {
+        // YouTube player states:
+        // -1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 5: video cued
+        if (event.data === YT.PlayerState.PLAYING) {
+            console.log('Video is playing!');
+            isVideoPlaying = true;
+            resumeGeneralFocusTimer();
+            // showPopupMessage('Task completed successfully!', 'success', 5000); // Green alert
+        } else if (event.data === YT.PlayerState.PAUSED) {
+            console.log('Video is paused.');
+            isVideoPlaying = false;
+            pauseGeneralFocusTimer();
+        }
+    }
+
+    let isVideoPlaying = false, isCalibrating = false;
+
+    // Handle overlay
+    function showOverlay(content) {
+        document.getElementById('overlay').style.display = 'block';
+        document.getElementById('modal-content').style.display = 'block';
+        document.getElementById('modal-body').innerHTML = content;
+    }
+
+    function hideOverlay() {
+        isCalibrating = false;
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('modal-content').style.display = 'none';
+    }
+
+    function loadScript(src) {
+        const script = document.createElement('script');
+        script.src = src;
+        script.type = 'text/javascript';
+        script.async = true; // Non-blocking load
+        script.onload = () => console.log(`Script ${src} loaded successfully.`);
+        script.onerror = () => console.error(`Failed to load script ${src}.`);
+        document.head.appendChild(script);
+    }
+
+    function loadTemplate() {
+        isCalibrating = true;
+        fetch('/calibrate')
+            .then(response => response.text())
+            .then(content => {
+                showOverlay(content);
+                loadScript('/static/js/calibrate.js');
+            });
+    }
+
+    // Functionality for checking if user is not looking at screen for extended period of time
+    let gazeStart = null;
+    let requiredDuration = 15;
+    let gazeTimer = null;
+    let failCount = 0;
+    let jitterTolerance = 5;
+    const gazeInterval = 1000;
+
+    function startNotFocusedTimer() {
+        if (gazeTimer)
+            return;
+
+        if (!gazeStart)
+            gazeStart = new Date();
+
+        gazeTimer = setInterval(() => {
+            if (!isVideoPlaying) {
+                resetNotFocusedTimer();
+                return;
+            }
+
+            const elapsedTime = (new Date() - gazeStart) / 1000;
+            if (elapsedTime >= requiredDuration) {
+                console.log("You are not looking at the screen!");
+                showPopupMessage("You are not looking at the assignment!", 'danger', 3000);
+                // resetGazeTracking();
+            } else {
+                // notifyUser(`Keep looking! Time remaining: ${(requiredDuration - elapsedTime).toFixed(1)} seconds.`);
+            }
+        }, gazeInterval);
+    }
+
+    function resetNotFocusedTimer() {
+        if (gazeTimer) {
+            clearInterval(gazeTimer);
+            gazeTimer = null;
+        }
+        gazeStart = null;
+        // isTrackingActive = false;
+    }
+
+    let generalTimer = null;
+    let startTime = null;
+    // let generalInterval = null;
+    let focusTime = 60;
+    let elapsedFocusTime = 0;
+    let unfocusedFrames = 0;
+    let totalFrames = 0;
+    let isOutside = false
+    let focusThreshold = 70;
+
+    // Functionality to check how if user has been focused over period of time
+    function resumeGeneralFocusTimer() {
+        if (generalTimer)
+            return;
+        if (!startTime) {
+            startTime = new Date();
+        } else {
+            // Adjust start time to account for paused elapsed time
+            startTime = new Date(new Date() - elapsedFocusTime * 1000);
+        }
+
+        generalTimer = setInterval(() => {
+            // Check if user is focused
+            if (isOutside)
+                unfocusedFrames++;
+            totalFrames++; // should be around equal to 5 * focustime
+            const elapsedTime = (new Date() - startTime) / 1000; // get time in seconds
+            // console.log(elapsedTime);
+            if (elapsedTime >= focusTime) {
+                startTime = new Date(); // Reset the timer
+                const averageFocus = (1 - (unfocusedFrames / totalFrames)) * 100
+                unfocusedFrames = 0;
+                totalFrames = 0;
+                if (averageFocus < focusThreshold)
+                    showPopupMessage("You seem a little out of focus. Your average focus was.. " + averageFocus, 'warning', 10000);
+                // alert('You seem a little out of focus. Your average focus was.. ' + averageFocus);
+            }
+        }, 200); // Checks 5 times a second
+
+    }
+
+    function pauseGeneralFocusTimer() {
+        if (!generalTimer) {
+            return; // No timer to pause
+        }
+
+        // Calculate the total elapsed focus time before pausing
+        elapsedFocusTime = (new Date() - startTime) / 1000;
+
+        // Clear the interval and reset the general timer reference
+        clearInterval(generalTimer);
+        generalTimer = null;
+    }
+
+    // Ensure everything is ready before starting WebGazer
+
+    window.onload = function () {
+        // Check if page has pdf instead of video
+        // Select the <embed> element whose src attribute starts with "/static/uploads/pdfs/"
+        const embedElement = document.querySelector('embed[src^="/static/uploads/pdfs/"]');
+        // Keep eye tracking data on if found
+        if (embedElement) {
+            console.log('PDF found, eye tracking data will stay on!');
+            isVideoPlaying  = true;
+            resumeGeneralFocusTimer();
+        }
+
+        // Enable WebGazer and set up gaze tracking
+        webgazer.setGazeListener((data, elapsedTime) => {
+            if (data && isVideoPlaying) {
+                const gazeX = data.x;
+                const gazeY = data.y;
+
+                // Get the video element
+                const videoDiv = document.getElementById('learning-content');
+                const rect = videoDiv.getBoundingClientRect(); // Get the element's bounding box
+
+                // Check if the gaze is outside the div
+                const isCurrentlyInside = (
+                    gazeX >= rect.left &&
+                    gazeX <= rect.right &&
+                    gazeY >= rect.top &&
+                    gazeY <= rect.bottom
+                );
+
+                // Handle gaze tracking jitter tolerance
+                if (isCurrentlyInside) {
+                    failCount = 0; // Reset fail count
+                    isOutside = false;
+                    document.getElementById('webgazerGazeDot').style.background = 'green'
+                    resetNotFocusedTimer();
+                    // if (!gazeTimer) {
+                    //     startGazeTimer();
+                    // }
+                } else {
+                    failCount++;
+                    if (failCount >= jitterTolerance) {
+                        isOutside = true;
+                        document.getElementById('webgazerGazeDot').style.background = 'red'
+                        startNotFocusedTimer()
+                        // console.log("You looked away too long from the box for too long. You are out of focus!");
+                        // resetGazeTracking();
+                    }
+                }
+
+                const payload = {
+                    assignment_id: "{{ assignment.id }}",
+                    x: gazeX,
+                    y: gazeY,
+                    outside: isOutside,
+                    timestamp: new Date().toISOString(),  // Include the current timestamp
+                };
+
+                // Send data to backend
+                fetch('/save_focus_data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                })
+                    .then(response => response.json())
+                    .then(data => console.log('Data saved:', data))
+                    .catch(error => console.error('Error:', error));
+
+                if (isOutside) {
+                    console.log("You're looking outside the learning content!", JSON.stringify(payload));
+                } else {
+                    console.log("Gaze is inside the learning content.", JSON.stringify(payload));
+                }
+            } else if (isCalibrating) {
+                // If calibrating no further info is needed
+                const gazeX = data.x;
+                const gazeY = data.y;
+            }
+        }).begin();
+
+        // Disable video feedback
+        webgazer.showVideo(false).showFaceOverlay(false).showFaceFeedbackBox(false);
+
+        // Optionally enable or disable the eye tracking dot
+        webgazer.showPredictionPoints(true);
+
+        console.log("WebGazer initialized.");
+
+        // Stop WebGazer on unload
+        window.onbeforeunload = function () {
+            webgazer.end();
+        };
+    };
+
+    $(document).ready(function () {
+
+        // Initialize Summernote
+        $('#note').summernote({
+            placeholder: 'Write your notes here...',
+            tabsize: 2,
+            height: 300,
+            toolbar: [
+                ['style', ['style']],
+                ['font', ['bold', 'underline', 'italic', 'clear', 'fontsize']],
+                ['color', ['color', 'backColor']],
+                ['para', ['ul', 'ol', 'paragraph']],
+                ['table', ['table']],
+                ['insert', ['link']]
+            ]
+        });
+
+
+        // AJAX form submission
+        $('#note-form').on('submit', function (e) {
+            e.preventDefault();
+
+            // Get the HTML content from Summernote
+            var noteContent = $('#note').summernote('code');
+
+            $.ajax({
+                type: 'POST',
+                url: window.location.href,
+                data: { note_content: noteContent },
+                success: function (response) {
+                    if (response.success) {
+                        // Show success message
+                        var flashMessage = $('<div>')
+                            .addClass('alert alert-success')
+                            .text(response.message)
+                            .hide()
+                            .appendTo('#flash-message')
+                            .fadeIn()
+                            .delay(4000)
+                            .fadeOut();
+                    }
+                },
+                error: function () {
+                    // Show error message
+                    var errorMessage = $('<div>')
+                        .addClass('alert alert-danger')
+                        .text('Error saving note')
+                        .hide()
+                        .appendTo('#flash-message')
+                        .fadeIn()
+                        .delay(4000)
+                        .fadeOut();
+                }
+            });
+        });
+
+    });
+</script>
+{% endblock %}
